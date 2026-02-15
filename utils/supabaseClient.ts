@@ -1,29 +1,21 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 
-// Safe access to environment variables
-const getEnv = (key: string) => {
-  try {
-    // @ts-ignore
-    if (typeof process !== 'undefined' && process.env) {
-      // @ts-ignore
-      return process.env[key];
-    }
-  } catch (e) {
-    // ignore
-  }
-  return '';
-};
+// ========================================
+// ENV VARIABLES (VITE SAFE ACCESS)
+// ========================================
 
-const supabaseUrl = getEnv('SUPABASE_URL');
-const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY');
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn("Supabase credentials missing. Database features will be disabled or fail.");
+  throw new Error("Supabase environment variables not configured.");
 }
 
-// Fallback values to prevent 'supabaseUrl is required' error during initialization
-// These will allow the app to load, but API calls will fail gracefully in the service layer.
-const url = supabaseUrl || 'https://placeholder.supabase.co';
-const key = supabaseAnonKey || 'placeholder';
+// ========================================
+// CLIENT
+// ========================================
 
-export const supabase = createClient(url, key);
+export const supabase = createClient(
+  supabaseUrl,
+  supabaseAnonKey
+);
