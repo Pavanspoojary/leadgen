@@ -3,7 +3,7 @@ import { Lead, ServiceResponse } from "../types";
 import { updateLeadInMemory } from "./memoryService";
 
 // =======================================================
-// CHECK GMAIL CONNECTION STATUS (STABLE)
+// CHECK GMAIL CONNECTION STATUS (FIXED)
 // =======================================================
 
 export const checkGmailStatus = async (): Promise<boolean> => {
@@ -15,10 +15,9 @@ export const checkGmailStatus = async (): Promise<boolean> => {
 
     if (error || !session) return false;
 
-    // Stable detection
-    const provider = session.user?.app_metadata?.provider;
+    // ✅ Proper persistent check
+    return session.user?.app_metadata?.provider === "google";
 
-    return provider === "google";
   } catch (err) {
     console.error("Gmail Status Check Failed:", err);
     return false;
@@ -26,7 +25,7 @@ export const checkGmailStatus = async (): Promise<boolean> => {
 };
 
 // =======================================================
-// CONNECT GMAIL
+// CONNECT GMAIL (OAUTH FLOW)
 // =======================================================
 
 export const connectGmail = async (): Promise<boolean> => {
@@ -56,26 +55,19 @@ export const connectGmail = async (): Promise<boolean> => {
 };
 
 // =======================================================
-// DISCONNECT GMAIL (DO NOT SIGN OUT USER)
+// DISCONNECT GMAIL
 // =======================================================
 
 export const disconnectGmail = async (): Promise<void> => {
   try {
-    const {
-      data: { session }
-    } = await supabase.auth.getSession();
-
-    if (!session) return;
-
-    // Just remove Google provider by signing out ONLY provider
-    await supabase.auth.signOut({ scope: "local" });
+    await supabase.auth.signOut();
   } catch (err) {
     console.error("Gmail Disconnect Failed:", err);
   }
 };
 
 // =======================================================
-// SEND EMAIL
+// SEND EMAIL (USES ACCESS TOKEN SAFELY)
 // =======================================================
 
 export const sendEmail = async (
@@ -83,6 +75,7 @@ export const sendEmail = async (
   subject: string,
   body: string
 ): Promise<ServiceResponse<{ messageId: string; threadId: string }>> => {
+
   try {
     if (!lead.email) {
       return {
@@ -95,16 +88,15 @@ export const sendEmail = async (
     }
 
     const {
-      data: { session },
-      error
+      data: { session }
     } = await supabase.auth.getSession();
 
-    if (error || !session?.provider_token) {
+    if (!session?.provider_token) {
       return {
         status: "error",
         error: {
           code: "AUTH_ERROR",
-          message: "Gmail session expired. Please reconnect in Settings."
+          message: "Gmail session expired. Please reconnect."
         }
       };
     }
@@ -115,7 +107,6 @@ export const sendEmail = async (
       `To: ${lead.email}`,
       `Subject: ${subject}`,
       "Content-Type: text/html; charset=utf-8",
-      "MIME-Version: 1.0",
       "",
       body
     ].join("\n");
@@ -140,7 +131,7 @@ export const sendEmail = async (
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data?.error?.message || "Gmail API failed");
+      throw new Error(data?.error?.message);
     }
 
     const updatedLead: Lead = {
@@ -162,24 +153,12 @@ export const sendEmail = async (
     };
 
   } catch (e: any) {
-    console.error("Gmail Send Error:", e);
-
     return {
       status: "error",
       error: {
         code: "API_ERROR",
-        message: e.message || "Unknown Gmail API error"
+        message: e.message || "Gmail API error"
       }
     };
   }
-};
-
-// =======================================================
-// CHECK REPLIES (SAFE PLACEHOLDER)
-// =======================================================
-
-export const checkReplies = async (
-  leads: Lead[]
-): Promise<Lead[]> => {
-  return leads;
 };
