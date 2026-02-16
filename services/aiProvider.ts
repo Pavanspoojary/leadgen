@@ -3,40 +3,34 @@ import { AiProviderStatus, AiError, AiResponse } from "../types";
 import { logAiAction } from "./databaseService";
 
 // =======================================================
-// GLOBAL PROVIDER STATE
+// PROVIDER STATE
 // =======================================================
 
 let providerStatus: AiProviderStatus = "not_configured";
 
-export const getProviderStatus = (): AiProviderStatus => providerStatus;
+export const getProviderStatus = (): AiProviderStatus => {
+  return providerStatus;
+};
 
 const setProviderStatus = (status: AiProviderStatus) => {
   providerStatus = status;
 };
 
 // =======================================================
-// ENV ACCESS
+// ENV ACCESS (VITE SAFE)
 // =======================================================
 
 const getApiKey = (): string => {
   try {
-    // Vite-style
-    // @ts-ignore
-    const viteKey = import.meta?.env?.VITE_GEMINI_API_KEY;
-    if (viteKey) return viteKey;
-
-    // Node-style fallback
-    // @ts-ignore
-    if (typeof process !== "undefined" && process.env?.API_KEY) {
-      return process.env.API_KEY;
-    }
-  } catch {}
-
-  return "";
+    const key = import.meta.env.VITE_GEMINI_API_KEY;
+    return key || "";
+  } catch {
+    return "";
+  }
 };
 
 // =======================================================
-// CLIENT FACTORY (SINGLE SOURCE)
+// CLIENT FACTORY
 // =======================================================
 
 let cachedClient: GoogleGenAI | null = null;
@@ -57,7 +51,7 @@ const getClient = (): GoogleGenAI => {
 };
 
 // =======================================================
-// STRICT ERROR PARSER
+// ERROR PARSER
 // =======================================================
 
 const parseGeminiError = (error: any): AiError => {
@@ -72,7 +66,7 @@ const parseGeminiError = (error: any): AiError => {
     error?.response?.data?.error?.code ||
     0;
 
-  // ---------- INVALID KEY ----------
+  // Invalid Key
   if (
     status === 401 ||
     status === 403 ||
@@ -84,38 +78,36 @@ const parseGeminiError = (error: any): AiError => {
     return {
       type: "invalid_key",
       message: "Invalid API Key. Please verify configuration.",
-      retryable: false
+      retryable: false,
     };
   }
 
-  // ---------- QUOTA EXCEEDED ----------
+  // Quota Exceeded
   if (
     status === 429 &&
-    (message.includes("quota") ||
-      message.includes("exceeded your current quota") ||
-      message.includes("resource_exhausted"))
+    (message.includes("quota") || message.includes("resource_exhausted"))
   ) {
     setProviderStatus("quota_exceeded");
 
     return {
       type: "quota_exceeded",
-      message: "Gemini quota exhausted. Upgrade plan or replace API key.",
-      retryable: false
+      message: "Gemini quota exhausted.",
+      retryable: false,
     };
   }
 
-  // ---------- RATE LIMIT ----------
+  // Rate Limit
   if (status === 429) {
     setProviderStatus("rate_limit");
 
     return {
       type: "rate_limit",
-      message: "Rate limit reached. Retrying shortly...",
-      retryable: true
+      message: "Rate limit reached.",
+      retryable: true,
     };
   }
 
-  // ---------- NETWORK ----------
+  // Network
   if (
     message.includes("network") ||
     message.includes("fetch") ||
@@ -125,18 +117,17 @@ const parseGeminiError = (error: any): AiError => {
 
     return {
       type: "network_error",
-      message: "Network connection failed.",
-      retryable: true
+      message: "Network error occurred.",
+      retryable: true,
     };
   }
 
-  // ---------- DEFAULT ----------
   setProviderStatus("network_error");
 
   return {
     type: "network_error",
-    message: message || "Unknown AI error occurred.",
-    retryable: true
+    message: message || "Unknown AI error.",
+    retryable: true,
   };
 };
 
@@ -144,23 +135,19 @@ const parseGeminiError = (error: any): AiError => {
 // RETRY WRAPPER
 // =======================================================
 
-async function withStrictRetry<T>(
+async function withRetry<T>(
   operation: () => Promise<T>,
   maxRetries = 3,
-  baseDelay = 1000
+  baseDelay = 1000,
 ): Promise<AiResponse<T>> {
-  // Hard block on fatal states
-  if (
-    providerStatus === "quota_exceeded" ||
-    providerStatus === "invalid_key"
-  ) {
+  if (providerStatus === "quota_exceeded" || providerStatus === "invalid_key") {
     return {
       success: false,
       error: {
         type: providerStatus,
-        message: `System blocked due to ${providerStatus}.`,
-        retryable: false
-      }
+        message: `Blocked due to ${providerStatus}.`,
+        retryable: false,
+      },
     };
   }
 
@@ -172,38 +159,23 @@ async function withStrictRetry<T>(
 
       setProviderStatus("connected");
 
-      await logAiAction("GENERATE", "gemini-3-flash-preview");
+      await logAiAction("GENERATE", "gemini-3-flash");
 
       return {
         success: true,
-        data: result
+        data: result,
       };
     } catch (err: any) {
-      const parsedError = parseGeminiError(err);
+      const parsed = parseGeminiError(err);
 
-      await logAiAction(
-        "GENERATE",
-        "gemini-3-flash-preview",
-        parsedError.type
-      );
+      await logAiAction("GENERATE", "gemini-3-flash", parsed.type);
 
-      // Stop immediately if not retryable
-      if (!parsedError.retryable) {
-        return { success: false, error: parsedError };
-      }
-
-      // Stop if max retries reached
-      if (attempt === maxRetries - 1) {
-        return { success: false, error: parsedError };
+      if (!parsed.retryable || attempt === maxRetries - 1) {
+        return { success: false, error: parsed };
       }
 
       const delay = baseDelay * Math.pow(2, attempt);
-
-      console.warn(
-        `[AI RETRY] Attempt ${attempt + 1} | ${parsedError.type} | ${delay}ms`
-      );
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await new Promise((r) => setTimeout(r, delay));
 
       attempt++;
     }
@@ -214,8 +186,8 @@ async function withStrictRetry<T>(
     error: {
       type: "network_error",
       message: "Max retries exceeded.",
-      retryable: false
-    }
+      retryable: false,
+    },
   };
 }
 
@@ -228,12 +200,11 @@ export const validateConnection = async (): Promise<boolean> => {
     const ai = getClient();
 
     await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts: [{ text: "Ping" }] }
+      model: "gemini-1.5-flash",
+      contents: { parts: [{ text: "Ping" }] },
     });
 
     setProviderStatus("connected");
-
     return true;
   } catch (err) {
     parseGeminiError(err);
@@ -248,18 +219,16 @@ export const validateConnection = async (): Promise<boolean> => {
 export const generateText = async (
   prompt: string,
   systemInstruction?: string,
-  config?: any
+  config?: any,
 ): Promise<AiResponse<GenerateContentResponse>> => {
-  return withStrictRetry(async () => {
+  return withRetry(async () => {
     const ai = getClient();
 
     return await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        systemInstruction,
-        ...config
-      }
+      model: "gemini-1.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction,
+      ...config,
     });
   });
 };
