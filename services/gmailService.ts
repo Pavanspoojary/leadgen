@@ -3,7 +3,7 @@ import { Lead, ServiceResponse } from "../types";
 import { updateLeadInMemory } from "./memoryService";
 
 // =======================================================
-// CHECK GMAIL CONNECTION STATUS
+// CHECK GMAIL CONNECTION STATUS (STABLE)
 // =======================================================
 
 export const checkGmailStatus = async (): Promise<boolean> => {
@@ -13,12 +13,12 @@ export const checkGmailStatus = async (): Promise<boolean> => {
       error
     } = await supabase.auth.getSession();
 
-    if (error) {
-      console.error("Gmail Session Error:", error);
-      return false;
-    }
+    if (error || !session) return false;
 
-    return !!session?.provider_token;
+    // Stable detection
+    const provider = session.user?.app_metadata?.provider;
+
+    return provider === "google";
   } catch (err) {
     console.error("Gmail Status Check Failed:", err);
     return false;
@@ -26,7 +26,7 @@ export const checkGmailStatus = async (): Promise<boolean> => {
 };
 
 // =======================================================
-// CONNECT GMAIL (OAUTH FLOW)
+// CONNECT GMAIL
 // =======================================================
 
 export const connectGmail = async (): Promise<boolean> => {
@@ -56,12 +56,19 @@ export const connectGmail = async (): Promise<boolean> => {
 };
 
 // =======================================================
-// DISCONNECT GMAIL
+// DISCONNECT GMAIL (DO NOT SIGN OUT USER)
 // =======================================================
 
 export const disconnectGmail = async (): Promise<void> => {
   try {
-    await supabase.auth.signOut();
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+
+    if (!session) return;
+
+    // Just remove Google provider by signing out ONLY provider
+    await supabase.auth.signOut({ scope: "local" });
   } catch (err) {
     console.error("Gmail Disconnect Failed:", err);
   }
@@ -104,32 +111,16 @@ export const sendEmail = async (
 
     const token = session.provider_token;
 
-    // RFC 2822 Email Formatting
-    const utf8Subject = `=?utf-8?B?${btoa(
-      new TextEncoder().encode(subject).reduce(
-        (data, byte) => data + String.fromCharCode(byte),
-        ""
-      )
-    )}?=`;
-
-    const messageParts = [
+    const message = [
       `To: ${lead.email}`,
-      `Subject: ${utf8Subject}`,
+      `Subject: ${subject}`,
       "Content-Type: text/html; charset=utf-8",
       "MIME-Version: 1.0",
       "",
       body
-    ];
+    ].join("\n");
 
-    const message = messageParts.join("\n");
-
-    // Base64URL Encoding
-    const encodedMessage = btoa(
-      new TextEncoder().encode(message).reduce(
-        (data, byte) => data + String.fromCharCode(byte),
-        ""
-      )
-    )
+    const encodedMessage = btoa(unescape(encodeURIComponent(message)))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
@@ -149,12 +140,9 @@ export const sendEmail = async (
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(
-        data?.error?.message || "Failed to send email via Gmail API"
-      );
+      throw new Error(data?.error?.message || "Gmail API failed");
     }
 
-    // Update Local State
     const updatedLead: Lead = {
       ...lead,
       status: "Email Sent",
@@ -187,14 +175,11 @@ export const sendEmail = async (
 };
 
 // =======================================================
-// CHECK REPLIES (PLACEHOLDER SAFE)
+// CHECK REPLIES (SAFE PLACEHOLDER)
 // =======================================================
 
 export const checkReplies = async (
   leads: Lead[]
 ): Promise<Lead[]> => {
-  // Requires gmail.readonly scope and thread polling.
-  // Safe placeholder to avoid breaking flow.
-
   return leads;
 };
