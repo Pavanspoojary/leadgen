@@ -1,10 +1,9 @@
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { AiProviderStatus, AiError, AiResponse } from "../types";
 import { logAiAction } from "./databaseService";
 
-// =======================================================
+// =========================================
 // GLOBAL STATE
-// =======================================================
+// =========================================
 
 let providerStatus: AiProviderStatus = "not_configured";
 
@@ -14,76 +13,30 @@ const setProviderStatus = (status: AiProviderStatus) => {
   providerStatus = status;
 };
 
-// =======================================================
-// ENV ACCESS (VERCEL SAFE)
-// =======================================================
+// =========================================
+// ENV ACCESS
+// =========================================
 
 const getApiKey = (): string => {
-  try {
-    if (typeof import.meta !== "undefined" && import.meta.env) {
-      const key = import.meta.env.VITE_GEMINI_API_KEY;
-      if (key && key.length > 10) {
-        return key;
-      }
-    }
-  } catch (err) {
-    console.error("ENV READ ERROR:", err);
+  if (typeof import.meta !== "undefined" && import.meta.env) {
+    const key = import.meta.env.VITE_GROQ_API_KEY;
+    if (key && key.length > 10) return key;
   }
-
   return "";
 };
 
-// =======================================================
-// CLIENT FACTORY
-// =======================================================
+// =========================================
+// ERROR HANDLER
+// =========================================
 
-let cachedClient: GoogleGenAI | null = null;
-
-const getClient = (): GoogleGenAI => {
-  const key = getApiKey();
-
-  if (!key) {
-    setProviderStatus("not_configured");
-    throw new Error("Gemini API key not configured.");
-  }
-
-  if (!cachedClient) {
-    cachedClient = new GoogleGenAI({ apiKey: key });
-  }
-
-  return cachedClient;
-};
-
-// =======================================================
-// ERROR PARSER
-// =======================================================
-
-const parseGeminiError = (error: any): AiError => {
-  const message =
-    error?.message?.toLowerCase() ||
-    error?.response?.data?.error?.message?.toLowerCase() ||
-    "";
-
-  const status =
-    error?.status ||
-    error?.response?.status ||
-    error?.response?.data?.error?.code ||
-    0;
+const parseGroqError = (error: any): AiError => {
+  const status = error?.status || error?.response?.status || 0;
 
   if (status === 401 || status === 403) {
     setProviderStatus("invalid_key");
     return {
       type: "invalid_key",
-      message: "Invalid API Key",
-      retryable: false
-    };
-  }
-
-  if (status === 429 && message.includes("quota")) {
-    setProviderStatus("quota_exceeded");
-    return {
-      type: "quota_exceeded",
-      message: "Quota exceeded",
+      message: "Invalid Groq API Key",
       retryable: false
     };
   }
@@ -105,62 +58,112 @@ const parseGeminiError = (error: any): AiError => {
   };
 };
 
-// =======================================================
-// VALIDATE CONNECTION (AUTO SET STATUS)
-// =======================================================
+// =========================================
+// VALIDATE CONNECTION
+// =========================================
 
 export const validateConnection = async (): Promise<boolean> => {
   try {
-    const ai = getClient();
+    const key = getApiKey();
 
-    await ai.models.generateContent({
-      model: "gemini-1.5-flash", // SAFER MODEL
-      contents: [{ role: "user", parts: [{ text: "Ping" }] }]
+    if (!key) {
+      setProviderStatus("not_configured");
+      return false;
+    }
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "llama3-8b-8192",
+        messages: [{ role: "user", content: "Ping" }]
+      })
     });
+
+    if (!res.ok) {
+      throw { status: res.status };
+    }
 
     setProviderStatus("connected");
     return true;
 
-  } catch (err) {
-    parseGeminiError(err);
+  } catch (err: any) {
+    parseGroqError(err);
     return false;
   }
 };
 
-// =======================================================
+// =========================================
 // GENERATE TEXT
-// =======================================================
+// =========================================
 
 export const generateText = async (
   prompt: string,
   systemInstruction?: string,
   config?: any
-): Promise<AiResponse<GenerateContentResponse>> => {
-  try {
-    const ai = getClient();
+): Promise<AiResponse<any>> => {
 
-    const result = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction,
-        ...config
+  try {
+    const key = getApiKey();
+
+    if (!key) {
+      setProviderStatus("not_configured");
+      return {
+        success: false,
+        error: {
+          type: "invalid_key",
+          message: "Groq API Key not configured",
+          retryable: false
+        }
+      };
+    }
+
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${key}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama3-8b-8192",
+          messages: [
+            ...(systemInstruction
+              ? [{ role: "system", content: systemInstruction }]
+              : []),
+            { role: "user", content: prompt }
+          ],
+          temperature: config?.temperature ?? 0.7
+        })
       }
-    });
+    );
+
+    if (!response.ok) {
+      throw { status: response.status };
+    }
+
+    const data = await response.json();
 
     setProviderStatus("connected");
 
-    await logAiAction("GENERATE", "gemini-1.5-flash");
+    await logAiAction("GENERATE", "llama3-8b-8192");
 
     return {
       success: true,
-      data: result
+      data: {
+        text: data.choices?.[0]?.message?.content || ""
+      }
     };
 
   } catch (err: any) {
-    const parsed = parseGeminiError(err);
 
-    await logAiAction("GENERATE", "gemini-1.5-flash", parsed.type);
+    const parsed = parseGroqError(err);
+
+    await logAiAction("GENERATE", "llama3-8b-8192", parsed.type);
 
     return {
       success: false,
