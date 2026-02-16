@@ -10,10 +10,7 @@ import {
   LogOut,
   ExternalLink,
 } from "lucide-react";
-import {
-  getProviderStatus,
-  validateConnection,
-} from "../services/aiProvider";
+import { getProviderStatus, validateConnection } from "../services/aiProvider";
 import {
   checkGmailStatus,
   connectGmail,
@@ -22,19 +19,17 @@ import {
 import { AiProviderStatus } from "../types";
 
 const SettingsView: React.FC = () => {
-  const [status, setStatus] =
-    useState<AiProviderStatus>("not_configured");
+  const [status, setStatus] = useState<AiProviderStatus>(
+    getProviderStatus()
+  );
   const [gmailConnected, setGmailConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [gmailLoading, setGmailLoading] = useState(false);
 
-  // 🔥 AUTO VALIDATE ON LOAD
   useEffect(() => {
     const init = async () => {
-      await validateConnection();
-      setStatus(getProviderStatus());
-      const gmail = await checkGmailStatus();
-      setGmailConnected(gmail);
+      const connected = await checkGmailStatus();
+      setGmailConnected(connected);
     };
 
     init();
@@ -47,19 +42,29 @@ const SettingsView: React.FC = () => {
     setLoading(false);
   };
 
+  const handleGmailConnect = async () => {
+    setGmailLoading(true);
+    await connectGmail();
+  };
+
+  const handleGmailDisconnect = async () => {
+    setGmailLoading(true);
+    await disconnectGmail();
+    setGmailConnected(false);
+    setGmailLoading(false);
+  };
+
   const getStatusColor = (s: AiProviderStatus) => {
     switch (s) {
       case "connected":
         return "text-emerald-400 bg-emerald-900/20 border-emerald-900/50";
+      case "invalid_key":
+      case "quota_exceeded":
+        return "text-red-400 bg-red-900/20 border-red-900/50";
       case "rate_limit":
         return "text-yellow-400 bg-yellow-900/20 border-yellow-900/50";
-      case "quota_exceeded":
-      case "invalid_key":
-        return "text-red-400 bg-red-900/20 border-red-900/50";
-      case "not_configured":
-        return "text-slate-400 bg-slate-800 border-slate-700";
       default:
-        return "text-red-400 bg-red-900/20 border-red-900/50";
+        return "text-slate-400 bg-slate-800 border-slate-700";
     }
   };
 
@@ -67,16 +72,16 @@ const SettingsView: React.FC = () => {
     switch (s) {
       case "connected":
         return "System Operational";
-      case "rate_limit":
-        return "Rate Limit Hit";
-      case "quota_exceeded":
-        return "Quota Exceeded";
       case "invalid_key":
         return "Invalid API Key";
+      case "quota_exceeded":
+        return "Quota Exceeded";
+      case "rate_limit":
+        return "Rate Limited";
       case "not_configured":
         return "API Key Not Found";
       default:
-        return "Connection Error";
+        return "Unknown";
     }
   };
 
@@ -96,6 +101,7 @@ const SettingsView: React.FC = () => {
         </div>
       </div>
 
+      {/* AI PROVIDER */}
       <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
         <div className="p-6 border-b border-slate-800">
           <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center">
@@ -121,7 +127,7 @@ const SettingsView: React.FC = () => {
               </span>
             </div>
             <div className="text-xs opacity-75 font-mono">
-              Gemini 1.5 Flash
+              Gemini
             </div>
           </div>
 
@@ -131,13 +137,13 @@ const SettingsView: React.FC = () => {
                 Connection Test
               </div>
               <div className="text-xs text-slate-500">
-                Validate API latency and key permissions.
+                Validate API connectivity.
               </div>
             </div>
             <button
               onClick={handleTestConnection}
               disabled={loading}
-              className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50"
+              className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold disabled:opacity-50"
             >
               {loading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -145,6 +151,50 @@ const SettingsView: React.FC = () => {
                 "Run Diagnostics"
               )}
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* GMAIL INTEGRATION */}
+      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+        <div className="p-6 border-b border-slate-800">
+          <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center">
+            <Shield className="w-4 h-4 mr-2 text-slate-500" />
+            Integrations
+          </h3>
+        </div>
+
+        <div className="p-6">
+          <div className="flex items-center justify-between bg-slate-950 p-4 rounded-lg border border-slate-800">
+            <div className="flex items-center">
+              <Mail className="w-6 h-6 text-red-400 mr-4" />
+              <div>
+                <div className="text-sm text-white font-medium">
+                  Google Workspace
+                </div>
+                <div className="text-xs text-slate-500">
+                  Gmail API integration
+                </div>
+              </div>
+            </div>
+
+            {gmailConnected ? (
+              <button
+                onClick={handleGmailDisconnect}
+                disabled={gmailLoading}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-sm font-bold border border-slate-700"
+              >
+                Disconnect
+              </button>
+            ) : (
+              <button
+                onClick={handleGmailConnect}
+                disabled={gmailLoading}
+                className="px-4 py-2 bg-white text-slate-900 rounded-lg text-sm font-bold"
+              >
+                Connect Gmail
+              </button>
+            )}
           </div>
         </div>
       </div>
